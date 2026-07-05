@@ -210,6 +210,33 @@ h3 {
   background: var(--ink);
 }
 
+.sync-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+  margin: -2px 0 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(255, 253, 248, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sync-bar button {
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.sync-bar button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .view {
   display: none;
 }

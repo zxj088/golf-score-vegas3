@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'vegasGolfState.v1';
 const HISTORY_KEY = 'vegasGolfHistory.v1';
 const COURSE_KEY = 'vegasGolfCourses.v1';
+const HISTORY_LIMIT = 60;
 
 const defaultCourses = [
   { id: 'bro-hof-stadium', name: 'Bro Hof Stadium', pars: [5,4,4,3,4,4,3,4,5,4,3,5,5,4,5,3,3,4] },
@@ -27,6 +28,13 @@ let state = {
 };
 
 let customCourses = [];
+let savedRounds = [];
+let syncState = {
+  ready: false,
+  busy: false,
+  label: 'Local only',
+  title: 'Supabase is not configured yet.'
+};
 
 const els = {
   installButton: document.querySelector('#installButton'),
@@ -57,6 +65,8 @@ const els = {
   tableTeamBTotal: document.querySelector('#tableTeamBTotal'),
   saveRound: document.querySelector('#saveRound'),
   clearRound: document.querySelector('#clearRound'),
+  syncStatus: document.querySelector('#syncStatus'),
+  syncNow: document.querySelector('#syncNow'),
   courseList: document.querySelector('#courseList'),
   addCourse: document.querySelector('#addCourse'),
   courseModal: document.querySelector('#courseModal'),
@@ -93,6 +103,14 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function saveCoursesLocal() {
+  localStorage.setItem(COURSE_KEY, JSON.stringify(customCourses));
+}
+
+function saveHistoryLocal() {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(savedRounds.slice(0, HISTORY_LIMIT)));
+}
+
 function slugify(value) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `course-${Date.now()}`;
 }
@@ -117,6 +135,230 @@ function roundFileName(course = currentCourse()) {
 function applySignedClass(element, value) {
   element.classList.toggle('point-positive', Number(value) > 0);
   element.classList.toggle('point-negative', Number(value) < 0);
+}
+
+function supabaseConfig() {
+  const raw = window.VEGAS_SUPABASE || {};
+  return {
+    url: String(raw.url || '').trim().replace(/\/+$/, ''),
+    anonKey: String(raw.anonKey || '').trim(),
+    syncKey: String(raw.syncKey || 'default').trim() || 'default'
+  };
+}
+
+function hasSupabaseConfig() {
+  const config = supabaseConfig();
+  return Boolean(
+    config.url &&
+    config.anonKey &&
+    config.url.includes('.supabase.co') &&
+    !config.anonKey.includes('PASTE')
+  );
+}
+
+function cloudId(type, id) {
+  return `${supabaseConfig().syncKey}:${type}:${id}`;
+}
+
+async function supabaseRequest(table, query = '', options = {}) {
+  const config = supabaseConfig();
+  const url = `${config.url}/rest/v1/${table}${query ? `?${query}` : ''}`;
+  const headers = {
+    apikey: config.anonKey,
+    Authorization: `Bearer ${config.anonKey}`,
+    'Content-Type': 'application/json',
+    Prefer: options.prefer || 'return=representation'
+  };
+  const response = await fetch(url, {
+    method: options.method || 'GET',
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || response.statusText);
+  }
+
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+function courseToCloudRow(course) {
+  return {
+    id: cloudId('course', course.id),
+    sync_key: supabaseConfig().syncKey,
+    course_id: course.id,
+    name: course.name,
+    pars: course.pars
+  };
+}
+
+function cloudRowToCourse(row) {
+  return {
+    id: row.course_id,
+    name: row.name,
+    pars: Array.isArray(row.pars) ? row.pars : []
+  };
+}
+
+function roundToCloudRow(round) {
+  return {
+    id: cloudId('round', round.id),
+    sync_key: supabaseConfig().syncKey,
+    saved_at: round.savedAt,
+    name: round.name,
+    file_name: round.fileName,
+    course_id: round.courseId,
+    course_name: round.courseName,
+    pars: round.pars,
+    players: round.players,
+    point_value: round.pointValue,
+    birdie_flip: round.birdieFlip,
+    scores: round.scores,
+    totals: round.totals
+  };
+}
+
+function cloudRowToRound(row) {
+  return {
+    id: String(row.id).split(':round:').pop(),
+    savedAt: Number(row.saved_at),
+    name: row.name,
+    fileName: row.file_name,
+    courseId: row.course_id,
+    courseName: row.course_name,
+    pars: Array.isArray(row.pars) ? row.pars : [],
+    players: Array.isArray(row.players) ? row.players : ['Player 1', 'Player 2', 'Player 3', 'Player 4'],
+    pointValue: Number(row.point_value || 1),
+    birdieFlip: Boolean(row.birdie_flip),
+    scores: Array.isArray(row.scores) ? row.scores : Array.from({ length: 18 }, () => ['', '', '', '']),
+    totals: row.totals || { a: 0, b: 0, complete: 0, players: [0, 0, 0, 0] }
+  };
+}
+
+function mergeById(localItems, remoteItems) {
+  const merged = new Map();
+  localItems.forEach(item => merged.set(item.id, item));
+  remoteItems.forEach(item => merged.set(item.id, item));
+  return Array.from(merged.values());
+}
+
+function mergeRounds(localRounds, remoteRounds) {
+  return mergeById(localRounds, remoteRounds)
+    .sort((a, b) => Number(b.savedAt || 0) - Number(a.savedAt || 0))
+    .slice(0, HISTORY_LIMIT);
+}
+
+function setSyncState(next) {
+  syncState = { ...syncState, ...next };
+  renderSyncStatus();
+}
+
+function renderSyncStatus() {
+  if (!els.syncStatus || !els.syncNow) return;
+  els.syncStatus.textContent = syncState.label;
+  els.syncStatus.title = syncState.title;
+  els.syncNow.disabled = syncState.busy || !syncState.ready;
+  els.syncNow.hidden = !syncState.ready;
+}
+
+async function fetchCloudCourses() {
+  const query = `select=*&sync_key=eq.${encodeURIComponent(supabaseConfig().syncKey)}&order=name.asc`;
+  const rows = await supabaseRequest('vegas_courses', query);
+  return rows.map(cloudRowToCourse).filter(course => course.pars.length === 18);
+}
+
+async function fetchCloudRounds() {
+  const query = `select=*&sync_key=eq.${encodeURIComponent(supabaseConfig().syncKey)}&order=saved_at.desc&limit=${HISTORY_LIMIT}`;
+  const rows = await supabaseRequest('vegas_rounds', query);
+  return rows.map(cloudRowToRound);
+}
+
+async function upsertCloudCourse(course) {
+  if (!hasSupabaseConfig()) return;
+  await supabaseRequest('vegas_courses', 'on_conflict=id', {
+    method: 'POST',
+    body: courseToCloudRow(course),
+    prefer: 'resolution=merge-duplicates,return=minimal'
+  });
+}
+
+async function upsertCloudRound(round) {
+  if (!hasSupabaseConfig()) return;
+  await supabaseRequest('vegas_rounds', 'on_conflict=id', {
+    method: 'POST',
+    body: roundToCloudRow(round),
+    prefer: 'resolution=merge-duplicates,return=minimal'
+  });
+}
+
+async function deleteCloudCourse(courseId) {
+  if (!hasSupabaseConfig()) return;
+  await supabaseRequest('vegas_courses', `id=eq.${encodeURIComponent(cloudId('course', courseId))}`, {
+    method: 'DELETE',
+    prefer: 'return=minimal'
+  });
+}
+
+async function deleteCloudRound(roundId) {
+  if (!hasSupabaseConfig()) return;
+  await supabaseRequest('vegas_rounds', `id=eq.${encodeURIComponent(cloudId('round', roundId))}`, {
+    method: 'DELETE',
+    prefer: 'return=minimal'
+  });
+}
+
+async function syncFromCloud(pushLocal = true) {
+  if (!hasSupabaseConfig()) {
+    setSyncState({
+      ready: false,
+      busy: false,
+      label: 'Local only',
+      title: 'Add your Supabase URL and anon key to supabase-config.js.'
+    });
+    return;
+  }
+
+  setSyncState({
+    ready: true,
+    busy: true,
+    label: 'Syncing...',
+    title: 'Sending and loading scorecard data.'
+  });
+
+  try {
+    if (pushLocal) {
+      await Promise.all([
+        ...customCourses.map(upsertCloudCourse),
+        ...savedRounds.map(upsertCloudRound)
+      ]);
+    }
+
+    const [cloudCourses, cloudRounds] = await Promise.all([
+      fetchCloudCourses(),
+      fetchCloudRounds()
+    ]);
+
+    customCourses = mergeById(customCourses, cloudCourses);
+    savedRounds = mergeRounds(savedRounds, cloudRounds);
+    saveCoursesLocal();
+    saveHistoryLocal();
+    setSyncState({
+      ready: true,
+      busy: false,
+      label: 'Cloud synced',
+      title: `Supabase room: ${supabaseConfig().syncKey}`
+    });
+    render();
+  } catch (error) {
+    setSyncState({
+      ready: true,
+      busy: false,
+      label: 'Sync failed',
+      title: error.message
+    });
+  }
 }
 
 function courseParInputs() {
@@ -359,12 +601,18 @@ function renderCourses() {
       deleteButton.type = 'button';
       deleteButton.className = 'danger';
       deleteButton.textContent = 'Delete';
-      deleteButton.addEventListener('click', () => {
+      deleteButton.addEventListener('click', async () => {
         customCourses = customCourses.filter(item => item.id !== course.id);
-        localStorage.setItem(COURSE_KEY, JSON.stringify(customCourses));
+        saveCoursesLocal();
         if (state.courseId === course.id) state.courseId = defaultCourses[0].id;
         saveState();
         render();
+        try {
+          await deleteCloudCourse(course.id);
+          await syncFromCloud(false);
+        } catch (error) {
+          setSyncState({ label: 'Sync failed', title: error.message, busy: false, ready: hasSupabaseConfig() });
+        }
       });
       row.querySelector('.small-actions').append(deleteButton);
     }
@@ -373,11 +621,21 @@ function renderCourses() {
   });
 }
 
+function ensureCourseFromRound(round) {
+  if (allCourses().some(course => course.id === round.courseId)) return;
+  if (!Array.isArray(round.pars) || round.pars.length !== 18) return;
+  customCourses.push({
+    id: round.courseId,
+    name: round.courseName,
+    pars: round.pars
+  });
+  saveCoursesLocal();
+}
+
 function renderHistory() {
-  const history = loadJson(HISTORY_KEY, []);
   els.historyList.innerHTML = '';
 
-  if (!history.length) {
+  if (!savedRounds.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.textContent = 'No saved rounds';
@@ -385,7 +643,7 @@ function renderHistory() {
     return;
   }
 
-  history.forEach((round, index) => {
+  savedRounds.forEach(round => {
     const row = document.createElement('div');
     row.className = 'history-row';
     const date = new Date(round.savedAt);
@@ -403,6 +661,7 @@ function renderHistory() {
     loadButton.type = 'button';
     loadButton.textContent = 'Load';
     loadButton.addEventListener('click', () => {
+      ensureCourseFromRound(round);
       state = {
         courseId: round.courseId,
         players: round.players,
@@ -419,11 +678,16 @@ function renderHistory() {
     deleteButton.type = 'button';
     deleteButton.className = 'danger';
     deleteButton.textContent = 'Delete';
-    deleteButton.addEventListener('click', () => {
-      const next = loadJson(HISTORY_KEY, []);
-      next.splice(index, 1);
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+    deleteButton.addEventListener('click', async () => {
+      savedRounds = savedRounds.filter(item => item.id !== round.id);
+      saveHistoryLocal();
       renderHistory();
+      try {
+        await deleteCloudRound(round.id);
+        await syncFromCloud(false);
+      } catch (error) {
+        setSyncState({ label: 'Sync failed', title: error.message, busy: false, ready: hasSupabaseConfig() });
+      }
     });
 
     row.querySelector('.small-actions').append(loadButton, deleteButton);
@@ -438,6 +702,7 @@ function render() {
   renderHoles();
   renderCourses();
   renderHistory();
+  renderSyncStatus();
 }
 
 function switchView(name) {
@@ -452,6 +717,10 @@ function switchView(name) {
 function addListeners() {
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => switchView(tab.dataset.view));
+  });
+
+  els.syncNow.addEventListener('click', () => {
+    syncFromCloud(true);
   });
 
   els.courseSelect.addEventListener('change', () => {
@@ -486,9 +755,8 @@ function addListeners() {
     render();
   });
 
-  els.saveRound.addEventListener('click', () => {
+  els.saveRound.addEventListener('click', async () => {
     const course = currentCourse();
-    const history = loadJson(HISTORY_KEY, []);
     const name = roundDisplayName(course);
     const round = {
       id: `round-${Date.now()}`,
@@ -504,10 +772,16 @@ function addListeners() {
       scores: state.scores.map(row => [...row]),
       totals: totals()
     };
-    history.unshift(round);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 60)));
+    savedRounds = mergeRounds([round, ...savedRounds], []);
+    saveHistoryLocal();
     renderHistory();
     switchView('history');
+    try {
+      await upsertCloudRound(round);
+      await syncFromCloud(false);
+    } catch (error) {
+      setSyncState({ label: 'Sync failed', title: error.message, busy: false, ready: hasSupabaseConfig() });
+    }
   });
 
   els.addCourse.addEventListener('click', () => {
@@ -526,7 +800,7 @@ function addListeners() {
     if (event.target === els.courseModal) closeCourseModal();
   });
 
-  els.courseForm.addEventListener('submit', event => {
+  els.courseForm.addEventListener('submit', async event => {
     event.preventDefault();
     const name = els.newCourseName.value.trim();
     const pars = readCourseFormPars();
@@ -546,12 +820,19 @@ function addListeners() {
       id = `${baseId}-${count}`;
       count += 1;
     }
-    customCourses.push({ id, name, pars });
-    localStorage.setItem(COURSE_KEY, JSON.stringify(customCourses));
+    const course = { id, name, pars };
+    customCourses.push(course);
+    saveCoursesLocal();
     state.courseId = id;
     saveState();
     closeCourseModal();
     render();
+    try {
+      await upsertCloudCourse(course);
+      await syncFromCloud(false);
+    } catch (error) {
+      setSyncState({ label: 'Sync failed', title: error.message, busy: false, ready: hasSupabaseConfig() });
+    }
   });
 
   window.addEventListener('beforeinstallprompt', event => {
@@ -571,6 +852,7 @@ function addListeners() {
 
 function init() {
   customCourses = loadJson(COURSE_KEY, []);
+  savedRounds = loadJson(HISTORY_KEY, []);
   state = { ...state, ...loadJson(STORAGE_KEY, {}) };
   if (!Array.isArray(state.scores) || state.scores.length !== 18) {
     state.scores = Array.from({ length: 18 }, () => ['', '', '', '']);
@@ -578,9 +860,18 @@ function init() {
   if (!Array.isArray(state.players) || state.players.length !== 4) {
     state.players = ['Player 1', 'Player 2', 'Player 3', 'Player 4'];
   }
+  if (hasSupabaseConfig()) {
+    setSyncState({
+      ready: true,
+      busy: false,
+      label: 'Cloud ready',
+      title: `Supabase room: ${supabaseConfig().syncKey}`
+    });
+  }
   renderCourseParInputs();
   addListeners();
   render();
+  syncFromCloud(true);
 }
 
 if ('serviceWorker' in navigator) {

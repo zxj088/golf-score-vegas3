@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1f6f5b">
   <title>Vegas Golf Scorecard</title>
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=7">
+  <link rel="stylesheet" href="./styles.css?v=8">
 </head>
 <body>
   <div class="app-shell">
@@ -43,6 +43,11 @@
         <button class="tab" type="button" data-view="courses">Courses</button>
         <button class="tab" type="button" data-view="history">History</button>
       </nav>
+
+      <div class="sync-bar">
+        <span id="syncStatus">Local only</span>
+        <button id="syncNow" type="button">Sync</button>
+      </div>
 
       <section class="view active" id="playView">
         <div class="control-panel">
@@ -154,6 +159,7 @@
     </form>
   </div>
 
-  <script src="./app.js?v=7" defer></script>
+  <script src="./supabase-config.js?v=8"></script>
+  <script src="./app.js?v=8" defer></script>
 </body>
 </html>
