@@ -403,6 +403,14 @@ function mergeRounds(localRounds, remoteRounds) {
     .slice(0, GAME_LIMIT);
 }
 
+function serverRounds(remoteRounds) {
+  return remoteRounds
+    .map(normalizeRound)
+    .filter(round => !isRoundDeleted(round))
+    .sort((a, b) => Number(b.savedAt || 0) - Number(a.savedAt || 0))
+    .slice(0, GAME_LIMIT);
+}
+
 function setSyncState(next) {
   syncState = { ...syncState, ...next };
   renderSyncStatus();
@@ -520,12 +528,7 @@ async function syncFromCloud(pushLocal = true, quiet = false) {
   }
 
   try {
-    if (pushLocal) {
-      await Promise.all([
-        ...customCourses.map(upsertCloudCourse),
-        ...savedRounds.map(upsertCloudRound)
-      ]);
-    }
+    if (pushLocal) await Promise.all(customCourses.map(upsertCloudCourse));
 
     const [cloudCourses, cloudRounds] = await Promise.all([
       fetchCloudCourses(),
@@ -533,7 +536,7 @@ async function syncFromCloud(pushLocal = true, quiet = false) {
     ]);
 
     customCourses = mergeById(customCourses, cloudCourses);
-    savedRounds = mergeRounds(savedRounds, cloudRounds);
+    savedRounds = serverRounds(cloudRounds);
     if (activeGameId && !isEditing && savedRounds.some(round => round.id === activeGameId)) {
       applyGameToState(savedRounds.find(round => round.id === activeGameId));
       saveState();
@@ -1188,10 +1191,17 @@ function renderCourses() {
   });
 }
 
-function roundSummary(round) {
+function roundListDate(round) {
   const date = new Date(round.savedAt);
-  const total = round.totals || {};
-  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} | ${round.courseName} | ${gameTee(round)} | A ${total.a}, B ${total.b}`;
+  const datePart = date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
+  const timePart = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${datePart} ${timePart}`;
+}
+
+function roundTeamsLine(round) {
+  const players = Array.isArray(round.players) ? round.players : [];
+  const [a1 = 'Player 1', a2 = 'Player 2', b1 = 'Player 3', b2 = 'Player 4'] = players;
+  return `Team A (${a1}+${a2}) vs. Team B (${b1}+${b2})`;
 }
 
 function renderGameList(container, rounds, emptyText, status) {
@@ -1214,15 +1224,18 @@ function renderGameList(container, rounds, emptyText, status) {
       <button class="game-open" type="button">
         <span class="playing-icon" aria-hidden="true"></span>
         <span class="game-copy">
-          <strong></strong>
-          <span class="game-meta"></span>
+          <span class="game-line game-main"></span>
+          <span class="game-line game-teams"></span>
+          <span class="game-line game-score"></span>
         </span>
       </button>
       <div class="small-actions"></div>
     `;
+    const total = round.totals || {};
     row.querySelector('.playing-icon').hidden = status !== 'playing';
-    row.querySelector('strong').textContent = round.name || round.courseName;
-    row.querySelector('.game-meta').textContent = roundSummary(round);
+    row.querySelector('.game-main').textContent = `${round.courseName || 'Course'} | ${roundListDate(round)} | ${gameTee(round)}`;
+    row.querySelector('.game-teams').textContent = roundTeamsLine(round);
+    row.querySelector('.game-score').textContent = `Total score: A ${Number(total.a || 0)}, B ${Number(total.b || 0)}`;
     row.querySelector('.game-open').addEventListener('click', () => loadGame(round.id, false, true));
     if (status === 'history') {
       const deleteButton = document.createElement('button');
@@ -1481,7 +1494,7 @@ function init() {
   renderCourseParInputs();
   addListeners();
   render();
-  syncFromCloud(true);
+  syncFromCloud(false);
   window.setInterval(() => {
     if (!hasSupabaseConfig() || syncState.busy) return;
     if (isEditing) {

@@ -421,10 +421,26 @@ textarea {
   min-width: 0;
 }
 
-.game-copy strong,
-.game-copy .game-meta {
+.game-line {
   display: block;
   line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-main {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.game-teams {
+  color: var(--muted);
+}
+
+.game-score {
+  color: var(--green);
+  font-weight: 800;
 }
 
 .playing-icon {
@@ -440,29 +456,16 @@ textarea {
   padding: 8px 12px;
 }
 
-.playing-game-row strong,
-.history-game-row strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.playing-game-row .game-meta,
-.history-game-row .game-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .history-game-row {
   padding: 7px 10px;
 }
 
-.history-game-row strong {
+.history-game-row .game-main {
   font-size: 13px;
 }
 
-.history-game-row span {
+.history-game-row .game-teams,
+.history-game-row .game-score {
   font-size: 10.5px;
 }
 
