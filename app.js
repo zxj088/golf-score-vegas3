@@ -1,7 +1,9 @@
 const STORAGE_KEY = 'vegasGolfState.v1';
 const HISTORY_KEY = 'vegasGolfHistory.v1';
 const COURSE_KEY = 'vegasGolfCourses.v1';
+const CLIENT_KEY = 'vegasGolfClientId.v1';
 const GAME_LIMIT = 200;
+const EDIT_LOCK_TTL_MS = 12000;
 
 const defaultCourses = [
   { id: 'bro-hof-stadium', name: 'Bro Hof Stadium', pars: [5,4,4,3,4,4,3,4,5,4,3,5,5,4,5,3,3,4] },
@@ -18,11 +20,11 @@ const defaultCourses = [
   { id: 'riksten', name: 'Riksten', pars: [5,4,3,4,5,4,4,3,4,4,4,5,3,4,5,3,4,4] }
 ];
 
-let deferredInstallPrompt = null;
 let activeGameId = '';
 let isEditing = false;
 let autoSyncTimer = null;
 let dialogResolver = null;
+const clientId = getClientId();
 let state = {
   courseId: defaultCourses[0].id,
   players: ['Player 1', 'Player 2', 'Player 3', 'Player 4'],
@@ -116,6 +118,14 @@ function emptyScores() {
   return Array.from({ length: 18 }, () => ['', '', '', '']);
 }
 
+function getClientId() {
+  const existing = localStorage.getItem(CLIENT_KEY);
+  if (existing) return existing;
+  const value = `client-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  localStorage.setItem(CLIENT_KEY, value);
+  return value;
+}
+
 function normalizeScores(scores) {
   const rows = Array.isArray(scores) ? scores : [];
   return Array.from({ length: 18 }, (_, rowIndex) => {
@@ -195,6 +205,31 @@ function gameCode(round) {
   return String(round?.totals?.editCode || '').trim();
 }
 
+function editLock(round) {
+  const lock = round?.totals?.editLock;
+  return lock && typeof lock === 'object' ? lock : null;
+}
+
+function editLockOwner(round) {
+  return String(editLock(round)?.owner || '');
+}
+
+function hasCurrentEditLock(round = currentGame()) {
+  const lock = editLock(round);
+  return Boolean(lock && lock.owner === clientId && Number(lock.expiresAt || 0) > Date.now());
+}
+
+function withCurrentEditLock(round) {
+  const normalized = normalizeRound(round);
+  const now = Date.now();
+  normalized.totals.editLock = {
+    owner: clientId,
+    updatedAt: now,
+    expiresAt: now + EDIT_LOCK_TTL_MS
+  };
+  return normalized;
+}
+
 function normalizeRound(round) {
   const savedAt = Number(round.savedAt || Date.now());
   const baseTotals = round.totals && typeof round.totals === 'object' ? round.totals : {};
@@ -224,7 +259,8 @@ function normalizeRound(round) {
       players: Array.isArray(baseTotals.players) ? baseTotals.players : [0, 0, 0, 0],
       status: baseTotals.status === 'playing' ? 'playing' : 'history',
       tee: baseTotals.tee || 'yellow',
-      editCode: String(baseTotals.editCode || '')
+      editCode: String(baseTotals.editCode || ''),
+      editLock: baseTotals.editLock && typeof baseTotals.editLock === 'object' ? baseTotals.editLock : null
     }
   };
 }
@@ -371,6 +407,13 @@ async function fetchCloudRounds() {
   return rows.map(cloudRowToRound);
 }
 
+async function fetchCloudRoundById(roundId) {
+  if (!hasSupabaseConfig() || !roundId) return null;
+  const query = `select=*&id=eq.${encodeURIComponent(cloudId('round', roundId))}&limit=1`;
+  const rows = await supabaseRequest('vegas_rounds', query);
+  return rows.length ? cloudRowToRound(rows[0]) : null;
+}
+
 async function upsertCloudCourse(course) {
   if (!hasSupabaseConfig()) return;
   await supabaseRequest('vegas_courses', 'on_conflict=id', {
@@ -484,6 +527,11 @@ function scheduleAutoSync(round) {
   setSyncState({ ready: true, busy: true, title: 'Saving scorecard changes.' });
   autoSyncTimer = window.setTimeout(async () => {
     try {
+      if (isEditing && round.id === activeGameId) {
+        const stillMine = await ensureEditLockStillMine();
+        if (!stillMine) return;
+        round = replaceRound(withCurrentEditLock(roundFromState(currentGame())));
+      }
       await upsertCloudRound(round);
       setSyncState({
         ready: true,
@@ -652,6 +700,7 @@ function roundFromState(existing = {}, statusOverride = null) {
   const status = statusOverride || previousTotals.status || 'playing';
   const tee = previousTotals.tee || 'yellow';
   const editCode = previousTotals.editCode || '';
+  const lock = previousTotals.editLock || null;
   const name = roundDisplayName(course);
   return normalizeRound({
     ...existing,
@@ -670,7 +719,8 @@ function roundFromState(existing = {}, statusOverride = null) {
       ...scoreTotals,
       status,
       tee,
-      editCode
+      editCode,
+      editLock: lock
     }
   });
 }
@@ -686,6 +736,56 @@ function replaceRound(round) {
   savedRounds = mergeRounds(savedRounds, []);
   saveHistoryLocal();
   return normalized;
+}
+
+async function acquireEditLock(round) {
+  const latest = await fetchCloudRoundById(round.id).catch(() => null);
+  const base = latest || round;
+  const locked = replaceRound(withCurrentEditLock(base));
+  activeGameId = locked.id;
+  applyGameToState(locked);
+  saveState();
+  await upsertCloudRound(locked);
+  setSyncState({
+    ready: true,
+    busy: false,
+    ok: true,
+    label: 'Cloud sync ok',
+    title: 'Edit lock acquired.'
+  });
+  return locked;
+}
+
+async function ensureEditLockStillMine() {
+  if (!isEditing || !activeGameId) return true;
+  const latest = await fetchCloudRoundById(activeGameId).catch(() => null);
+  if (!latest) return true;
+  const owner = editLockOwner(latest);
+  if (owner && owner !== clientId) {
+    replaceRound(latest);
+    applyGameToState(latest);
+    isEditing = false;
+    saveState();
+    render();
+    setSyncState({
+      ready: true,
+      busy: false,
+      ok: true,
+      label: 'Cloud sync ok',
+      title: 'Another phone is now editing this game.'
+    });
+    return false;
+  }
+  const refreshed = replaceRound(withCurrentEditLock(roundFromState(latest)));
+  await upsertCloudRound(refreshed);
+  setSyncState({
+    ready: true,
+    busy: false,
+    ok: true,
+    label: 'Cloud sync ok',
+    title: 'Edit lock refreshed.'
+  });
+  return true;
 }
 
 function ensureCourseFromRound(round) {
@@ -789,6 +889,21 @@ async function confirmDialog(title, message) {
   });
 }
 
+async function confirmCodeDialog(title, message, errorMessage = '') {
+  return openAppDialog({
+    eyebrow: 'Edit Code',
+    title,
+    message: errorMessage || message,
+    input: true,
+    inputLabel: 'Code',
+    inputMode: 'numeric',
+    maxLength: '2',
+    pattern: '[0-9]{2}',
+    okText: 'Yes',
+    cancelText: 'No'
+  });
+}
+
 async function askCodeDialog(errorMessage = '') {
   return openAppDialog({
     eyebrow: 'Edit Code',
@@ -811,7 +926,22 @@ async function verifyCodeForRound(round) {
   while (true) {
     const answer = await askCodeDialog(errorMessage);
     if (answer === false) return false;
-    if (answer === '59' || (/^\d{2}$/.test(code) && answer === code)) return true;
+    if (codeMatchesRound(round, answer)) return true;
+    errorMessage = 'The edit code is not correct. Try again.';
+  }
+}
+
+function codeMatchesRound(round, value) {
+  const code = gameCode(round);
+  return value === '59' || (/^\d{2}$/.test(code) && value === code);
+}
+
+async function confirmEditWithCode(round) {
+  let errorMessage = '';
+  while (true) {
+    const answer = await confirmCodeDialog('Edit game', 'Enter code, then choose Yes to edit this game.', errorMessage);
+    if (answer === false) return false;
+    if (codeMatchesRound(round, answer)) return true;
     errorMessage = 'The edit code is not correct. Try again.';
   }
 }
@@ -823,23 +953,13 @@ async function verifyActiveCode() {
 async function deleteHistoryGame(round) {
   if (!(await confirmDialog('Delete game', 'Delete this finished game from History?'))) return;
   if (!(await verifyCodeForRound(round))) return;
-  savedRounds = savedRounds.filter(item => item.id !== round.id);
-  if (activeGameId === round.id) {
-    activeGameId = '';
-    chooseInitialGame();
-  }
-  saveHistoryLocal();
-  saveState();
-  render();
+  setSyncState({
+    ready: true,
+    busy: true,
+    title: 'Deleting game from cloud.'
+  });
   try {
     await deleteCloudRound(round.id);
-    setSyncState({
-      ready: true,
-      busy: false,
-      ok: true,
-      label: 'Cloud sync ok',
-      title: 'Deleted from cloud.'
-    });
   } catch (error) {
     setSyncState({
       ready: true,
@@ -848,7 +968,24 @@ async function deleteHistoryGame(round) {
       label: 'Cloud sync Not ok',
       title: error.message
     });
+    await showMessage('Delete failed', 'Could not delete this game from the cloud. Try again.');
+    return;
   }
+  savedRounds = savedRounds.filter(item => item.id !== round.id);
+  if (activeGameId === round.id) {
+    activeGameId = '';
+    chooseInitialGame();
+  }
+  saveHistoryLocal();
+  saveState();
+  render();
+  setSyncState({
+    ready: true,
+    busy: false,
+    ok: true,
+    label: 'Cloud sync ok',
+    title: 'Deleted from cloud.'
+  });
 }
 
 function renderCourseSelect() {
@@ -1083,8 +1220,8 @@ function addListeners() {
   els.editGame.addEventListener('click', async () => {
     if (!currentGame()) return;
     if (!isEditing) {
-      if (!(await confirmDialog('Edit game', 'Edit this game?'))) return;
-      if (!(await verifyActiveCode())) return;
+      if (!(await confirmEditWithCode(currentGame()))) return;
+      await acquireEditLock(currentGame());
       isEditing = true;
       render();
       return;
@@ -1093,6 +1230,8 @@ function addListeners() {
     if (!(await confirmDialog('Finish game', 'Finish this game and move it to History?'))) return;
     if (!(await verifyActiveCode())) return;
     const finished = replaceRound(roundFromState(currentGame(), 'history'));
+    finished.totals.editLock = null;
+    saveHistoryLocal();
     isEditing = false;
     scheduleAutoSync(finished);
     render();
@@ -1255,19 +1394,8 @@ function addListeners() {
     scheduleAutoSync(game);
   });
 
-  window.addEventListener('beforeinstallprompt', event => {
-    event.preventDefault();
-    deferredInstallPrompt = event;
-  });
-
-  els.installButton.addEventListener('click', async () => {
-    if (!deferredInstallPrompt) {
-      await showMessage('Save to desktop', 'Use your browser menu, then choose Add to Home Screen or Install App.');
-      return;
-    }
-    deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice;
-    deferredInstallPrompt = null;
+  els.installButton.addEventListener('click', () => {
+    window.location.reload();
   });
 }
 
@@ -1296,7 +1424,10 @@ function init() {
   render();
   syncFromCloud(true);
   window.setInterval(() => {
-    if (!isEditing && hasSupabaseConfig() && !syncState.busy) {
+    if (!hasSupabaseConfig() || syncState.busy) return;
+    if (isEditing) {
+      ensureEditLockStillMine();
+    } else {
       syncFromCloud(false, true);
     }
   }, 4000);
