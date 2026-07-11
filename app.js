@@ -2,6 +2,7 @@ const STORAGE_KEY = 'vegasGolfState.v1';
 const HISTORY_KEY = 'vegasGolfHistory.v1';
 const COURSE_KEY = 'vegasGolfCourses.v1';
 const CLIENT_KEY = 'vegasGolfClientId.v1';
+const DELETE_KEY = 'vegasGolfDeletedRounds.v1';
 const GAME_LIMIT = 200;
 const EDIT_LOCK_TTL_MS = 12000;
 
@@ -35,6 +36,7 @@ let state = {
 
 let customCourses = [];
 let savedRounds = [];
+let deletedRoundKeys = [];
 let syncState = {
   ready: false,
   busy: false,
@@ -167,6 +169,10 @@ function saveHistoryLocal() {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(savedRounds.slice(0, GAME_LIMIT)));
 }
 
+function saveDeletedRoundKeys() {
+  localStorage.setItem(DELETE_KEY, JSON.stringify(deletedRoundKeys.slice(-GAME_LIMIT)));
+}
+
 function slugify(value) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `course-${Date.now()}`;
 }
@@ -203,6 +209,22 @@ function gameTee(round) {
 
 function gameCode(round) {
   return String(round?.totals?.editCode || '').trim();
+}
+
+function roundDeleteKey(round) {
+  if (!round) return '';
+  return [round.id || '', round.savedAt || '', round.name || ''].join('|');
+}
+
+function markRoundDeleted(round) {
+  const key = roundDeleteKey(round);
+  if (!key || deletedRoundKeys.includes(key)) return;
+  deletedRoundKeys = [...deletedRoundKeys, key].slice(-GAME_LIMIT);
+  saveDeletedRoundKeys();
+}
+
+function isRoundDeleted(round) {
+  return deletedRoundKeys.includes(roundDeleteKey(round));
 }
 
 function editLock(round) {
@@ -375,7 +397,8 @@ function mergeById(localItems, remoteItems) {
 }
 
 function mergeRounds(localRounds, remoteRounds) {
-  return mergeById(localRounds.map(normalizeRound), remoteRounds.map(normalizeRound))
+  const remoteVisible = remoteRounds.map(normalizeRound).filter(round => !isRoundDeleted(round));
+  return mergeById(localRounds.map(normalizeRound), remoteVisible)
     .sort((a, b) => Number(b.savedAt || 0) - Number(a.savedAt || 0))
     .slice(0, GAME_LIMIT);
 }
@@ -440,12 +463,33 @@ async function deleteCloudCourse(courseId) {
   });
 }
 
-async function deleteCloudRound(roundId) {
+async function deleteCloudRound(roundOrId) {
   if (!hasSupabaseConfig()) return;
-  await supabaseRequest('vegas_rounds', `id=eq.${encodeURIComponent(cloudId('round', roundId))}`, {
+  const round = typeof roundOrId === 'string' ? { id: roundOrId } : normalizeRound(roundOrId);
+  const byId = await supabaseRequest('vegas_rounds', `id=eq.${encodeURIComponent(cloudId('round', round.id))}`, {
     method: 'DELETE',
-    prefer: 'return=minimal'
+    prefer: 'return=representation'
   });
+  if (Array.isArray(byId) && byId.length) return byId.length;
+  if (!round.savedAt || !round.name) return 0;
+  const byRoundFields = await supabaseRequest(
+    'vegas_rounds',
+    `sync_key=eq.${encodeURIComponent(supabaseConfig().syncKey)}&saved_at=eq.${encodeURIComponent(round.savedAt)}&name=eq.${encodeURIComponent(round.name)}`,
+    {
+      method: 'DELETE',
+      prefer: 'return=representation'
+    }
+  );
+  if (Array.isArray(byRoundFields) && byRoundFields.length) return byRoundFields.length;
+  const bySavedAt = await supabaseRequest(
+    'vegas_rounds',
+    `sync_key=eq.${encodeURIComponent(supabaseConfig().syncKey)}&saved_at=eq.${encodeURIComponent(round.savedAt)}`,
+    {
+      method: 'DELETE',
+      prefer: 'return=representation'
+    }
+  );
+  return Array.isArray(bySavedAt) ? bySavedAt.length : 0;
 }
 
 function chooseInitialGame() {
@@ -936,14 +980,26 @@ function codeMatchesRound(round, value) {
   return value === '59' || (/^\d{2}$/.test(code) && value === code);
 }
 
-async function confirmEditWithCode(round) {
+async function confirmActionWithCode(round, title, message) {
   let errorMessage = '';
   while (true) {
-    const answer = await confirmCodeDialog('Edit game', 'Enter code, then choose Yes to edit this game.', errorMessage);
+    const answer = await confirmCodeDialog(title, message, errorMessage);
     if (answer === false) return false;
     if (codeMatchesRound(round, answer)) return true;
     errorMessage = 'The edit code is not correct. Try again.';
   }
+}
+
+async function confirmEditWithCode(round) {
+  return confirmActionWithCode(round, 'Edit game', 'Enter code, then choose Yes to edit this game.');
+}
+
+async function confirmFinishWithCode(round) {
+  return confirmActionWithCode(round, 'Finish game', 'Enter code, then choose Yes to finish this game.');
+}
+
+async function confirmDeleteWithCode(round) {
+  return confirmActionWithCode(round, 'Delete game', 'Enter code, then choose Yes to delete this finished game.');
 }
 
 async function verifyActiveCode() {
@@ -951,15 +1007,14 @@ async function verifyActiveCode() {
 }
 
 async function deleteHistoryGame(round) {
-  if (!(await confirmDialog('Delete game', 'Delete this finished game from History?'))) return;
-  if (!(await verifyCodeForRound(round))) return;
+  if (!(await confirmDeleteWithCode(round))) return;
   setSyncState({
     ready: true,
     busy: true,
     title: 'Deleting game from cloud.'
   });
   try {
-    await deleteCloudRound(round.id);
+    await deleteCloudRound(round);
   } catch (error) {
     setSyncState({
       ready: true,
@@ -971,6 +1026,7 @@ async function deleteHistoryGame(round) {
     await showMessage('Delete failed', 'Could not delete this game from the cloud. Try again.');
     return;
   }
+  markRoundDeleted(round);
   savedRounds = savedRounds.filter(item => item.id !== round.id);
   if (activeGameId === round.id) {
     activeGameId = '';
@@ -1173,7 +1229,10 @@ function renderGameList(container, rounds, emptyText, status) {
       deleteButton.type = 'button';
       deleteButton.className = 'danger';
       deleteButton.textContent = 'Delete';
-      deleteButton.addEventListener('click', () => deleteHistoryGame(round));
+      deleteButton.addEventListener('click', event => {
+        event.stopPropagation();
+        deleteHistoryGame(round);
+      });
       row.querySelector('.small-actions').append(deleteButton);
     }
     container.append(row);
@@ -1227,8 +1286,7 @@ function addListeners() {
       return;
     }
 
-    if (!(await confirmDialog('Finish game', 'Finish this game and move it to History?'))) return;
-    if (!(await verifyActiveCode())) return;
+    if (!(await confirmFinishWithCode(currentGame()))) return;
     const finished = replaceRound(roundFromState(currentGame(), 'history'));
     finished.totals.editLock = null;
     saveHistoryLocal();
@@ -1401,7 +1459,8 @@ function addListeners() {
 
 function init() {
   customCourses = loadJson(COURSE_KEY, []);
-  savedRounds = loadJson(HISTORY_KEY, []).map(normalizeRound);
+  deletedRoundKeys = loadJson(DELETE_KEY, []);
+  savedRounds = loadJson(HISTORY_KEY, []).map(normalizeRound).filter(round => !isRoundDeleted(round));
   const savedState = loadJson(STORAGE_KEY, {});
   activeGameId = savedState.activeGameId || '';
   state = { ...state, ...savedState, scores: normalizeScores(savedState.scores) };
