@@ -32,6 +32,7 @@
     'New Course': '新球场',
     'Course name': '球场名称',
     'Edit code': '编辑密码',
+    'Tee time': '开球时间',
     'Holes 1-9': '第1-9洞',
     'Holes 10-18': '第10-18洞',
     'Out': '前九洞',

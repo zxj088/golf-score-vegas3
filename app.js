@@ -101,6 +101,7 @@ const els = {
   newPlayerB2: document.querySelector('#newPlayerB2'),
   newGameCourse: document.querySelector('#newGameCourse'),
   newGameCode: document.querySelector('#newGameCode'),
+  newGameTeeTime: document.querySelector('#newGameTeeTime'),
   newGameBirdieFlip: document.querySelector('#newGameBirdieFlip'),
   playingList: document.querySelector('#playingList'),
   historyList: document.querySelector('#historyList'),
@@ -293,6 +294,7 @@ function normalizeRound(round) {
       players: Array.isArray(baseTotals.players) ? baseTotals.players : [0, 0, 0, 0],
       status: baseTotals.status === 'playing' ? 'playing' : 'history',
       editCode: String(baseTotals.editCode || ''),
+      teeTime: String(baseTotals.teeTime || ''),
       editLock: baseTotals.editLock && typeof baseTotals.editLock === 'object' ? baseTotals.editLock : null
     }
   };
@@ -778,6 +780,7 @@ function openGameModal() {
   els.gameForm.reset();
   renderNewGameCourses();
   els.newGameBirdieFlip.checked = true;
+  els.newGameTeeTime.value = dateTimeInputValue(new Date());
   els.newPlayerA1.value = 'Player 1';
   els.newPlayerA2.value = 'Player 2';
   els.newPlayerB1.value = 'Player 3';
@@ -922,6 +925,7 @@ function roundFromState(existing = {}, statusOverride = null) {
   const scoreTotals = totals();
   const status = statusOverride || previousTotals.status || 'playing';
   const editCode = previousTotals.editCode || '';
+  const teeTime = previousTotals.teeTime || '';
   const lock = previousTotals.editLock || null;
   const name = roundDisplayName(course);
   return normalizeRound({
@@ -940,6 +944,7 @@ function roundFromState(existing = {}, statusOverride = null) {
       ...scoreTotals,
       status,
       editCode,
+      teeTime,
       editLock: lock
     }
   });
@@ -1261,6 +1266,7 @@ function renderInputs() {
 
 function renderScoreStrip() {
   const course = currentCourse();
+  const game = currentGame();
   const total = totals();
   const parTotal = course.pars.reduce((a, b) => a + b, 0);
   els.teamAPlayers.textContent = `${state.players[0]} + ${state.players[1]}`;
@@ -1270,7 +1276,7 @@ function renderScoreStrip() {
   applySignedClass(els.teamATotal, total.a);
   applySignedClass(els.teamBTotal, total.b);
   els.holesComplete.textContent = `${total.complete}/18`;
-  els.coursePar.textContent = t('Par {value}', { value: parTotal });
+  els.coursePar.textContent = formatTeeTime(game?.totals?.teeTime, game?.savedAt);
   els.totalPar.textContent = parTotal;
   els.playerTotals.forEach((cell, index) => {
     cell.textContent = total.players[index];
@@ -1394,11 +1400,22 @@ function renderCourses() {
   });
 }
 
+function dateTimeInputValue(date) {
+  const pad = value => String(value).padStart(2, '0');
+  return `${String(date.getFullYear()).slice(2)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatTeeTime(value, fallback = Date.now()) {
+  const raw = String(value || '');
+  if (/^\d{2}-\d{2}-\d{2} \d{2}:\d{2}$/.test(raw)) return raw;
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (match) return `${match[1].slice(2)}-${match[2]}-${match[3]} ${match[4]}:${match[5]}`;
+  const date = new Date(fallback);
+  return dateTimeInputValue(date);
+}
+
 function roundListDate(round) {
-  const date = new Date(round.savedAt);
-  const datePart = date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
-  const timePart = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return `${datePart} ${timePart}`;
+  return formatTeeTime(round.totals?.teeTime, round.savedAt);
 }
 
 function roundTeamsLine(round) {
@@ -1661,6 +1678,7 @@ function addListeners() {
       return;
     }
     const course = allCourses().find(item => item.id === els.newGameCourse.value) || allCourses()[0];
+    const teeTime = els.newGameTeeTime.value;
     state = {
       courseId: course.id,
       players,
@@ -1670,7 +1688,8 @@ function addListeners() {
     const game = replaceRound(roundFromState({
       totals: {
         status: 'playing',
-        editCode: code
+        editCode: code,
+        teeTime
       }
     }, 'playing'));
     activeGameId = game.id;
