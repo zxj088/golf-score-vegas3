@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1f6f5b">
   <title>Vegas Golf Scorecard</title>
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=32">
+  <link rel="stylesheet" href="./styles.css?v=33">
 </head>
 <body>
   <div class="app-shell">
@@ -137,6 +137,11 @@
         <input id="newCourseName" type="text" autocomplete="off" required>
       </label>
 
+      <label>
+        Edit code
+        <input id="newCourseCode" type="text" inputmode="numeric" pattern="[0-9]{2}" maxlength="2" placeholder="00" required>
+      </label>
+
       <div class="par-editor" aria-label="Course par strokes">
         <section>
           <h3>Holes 1-9</h3>
@@ -262,7 +267,7 @@
     </form>
   </div>
 
-  <script src="./supabase-config.js?v=32"></script>
-  <script src="./app.js?v=32" defer></script>
+  <script src="./supabase-config.js?v=33"></script>
+  <script src="./app.js?v=33" defer></script>
 </body>
 </html>

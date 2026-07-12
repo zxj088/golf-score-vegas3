@@ -81,6 +81,7 @@ const els = {
   courseModal: document.querySelector('#courseModal'),
   courseForm: document.querySelector('#courseForm'),
   newCourseName: document.querySelector('#newCourseName'),
+  newCourseCode: document.querySelector('#newCourseCode'),
   cancelCourse: document.querySelector('#cancelCourse'),
   cancelCourseBottom: document.querySelector('#cancelCourseBottom'),
   frontNineList: document.querySelector('#frontNineList'),
@@ -354,15 +355,20 @@ function courseToCloudRow(course) {
     sync_key: supabaseConfig().syncKey,
     course_id: course.id,
     name: course.name,
-    pars: course.pars
+    pars: {
+      values: course.pars,
+      editCode: String(course.editCode || '')
+    }
   };
 }
 
 function cloudRowToCourse(row) {
+  const storedPars = row.pars;
   return {
     id: row.course_id,
     name: row.name,
-    pars: Array.isArray(row.pars) ? row.pars : []
+    pars: Array.isArray(storedPars) ? storedPars : (Array.isArray(storedPars?.values) ? storedPars.values : []),
+    editCode: Array.isArray(storedPars) ? '' : String(storedPars?.editCode || '')
   };
 }
 
@@ -1170,6 +1176,22 @@ async function confirmDeleteWithCode(round) {
   return confirmActionWithCode(round, 'Delete game', 'Enter code, then choose Yes to delete this finished game.');
 }
 
+async function confirmDeleteCourseWithCode(course) {
+  let errorMessage = '';
+  while (true) {
+    const answer = await confirmCodeDialog(
+      'Delete course',
+      course.editCode
+        ? 'Enter the course edit code, then choose Yes to delete this course.'
+        : 'This older course has no edit code. Use the universal code to delete it.',
+      errorMessage
+    );
+    if (answer === false) return false;
+    if (answer === '59' || (/^\d{2}$/.test(course.editCode || '') && answer === course.editCode)) return true;
+    errorMessage = 'The edit code is not correct. Try again.';
+  }
+}
+
 async function verifyActiveCode() {
   return verifyCodeForRound(currentGame());
 }
@@ -1348,6 +1370,7 @@ function renderCourses() {
       deleteButton.className = 'danger';
       deleteButton.textContent = 'Delete';
       deleteButton.addEventListener('click', async () => {
+        if (!(await confirmDeleteCourseWithCode(course))) return;
         customCourses = customCourses.filter(item => item.id !== course.id);
         saveCoursesLocal();
         if (state.courseId === course.id) state.courseId = defaultCourses[0].id;
@@ -1577,12 +1600,13 @@ function addListeners() {
   els.courseForm.addEventListener('submit', async event => {
     event.preventDefault();
     const name = els.newCourseName.value.trim();
+    const editCode = els.newCourseCode.value.trim();
     const pars = readCourseFormPars();
-    const valid = name && pars.length === 18 && pars.every(par => Number.isInteger(par) && par > 0 && par < 8);
+    const valid = name && /^\d{2}$/.test(editCode) && pars.length === 18 && pars.every(par => Number.isInteger(par) && par > 0 && par < 8);
     if (!valid) {
       const invalidInput = courseParInputs().find(input => !Number.isInteger(Number(input.value)) || Number(input.value) <= 0 || Number(input.value) >= 8);
-      const target = name ? invalidInput : els.newCourseName;
-      target.setCustomValidity(name ? 'Enter a par from 1 to 7.' : 'Enter a course name.');
+      const target = !name ? els.newCourseName : (!/^\d{2}$/.test(editCode) ? els.newCourseCode : invalidInput);
+      target.setCustomValidity(!name ? 'Enter a course name.' : (!/^\d{2}$/.test(editCode) ? 'Enter a 2 digit code.' : 'Enter a par from 1 to 7.'));
       target.reportValidity();
       target.setCustomValidity('');
       return;
@@ -1594,7 +1618,7 @@ function addListeners() {
       id = `${baseId}-${count}`;
       count += 1;
     }
-    const course = { id, name, pars };
+    const course = { id, name, pars, editCode };
     customCourses.push(course);
     saveCoursesLocal();
     state.courseId = id;
