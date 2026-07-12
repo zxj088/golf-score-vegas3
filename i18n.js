@@ -90,7 +90,6 @@
     'Enter code, then choose Yes to delete this finished game.': '输入密码，然后选择“是”以删除此已结束的比赛。',
     'Delete course': '删除球场',
     'Enter the course edit code, then choose Yes to delete this course.': '输入球场编辑密码，然后选择“是”以删除此球场。',
-    'This older course has no edit code. Use the universal code to delete it.': '此旧球场没有编辑密码，请使用通用密码删除。',
     'Deleting game from cloud.': '正在从云端删除比赛。',
     'Delete failed': '删除失败',
     'Could not delete this game from the cloud. Try again.': '无法从云端删除此比赛，请重试。',

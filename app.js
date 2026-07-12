@@ -1187,9 +1187,7 @@ async function confirmDeleteCourseWithCode(course) {
   while (true) {
     const answer = await confirmCodeDialog(
       t('Delete course'),
-      course.editCode
-        ? t('Enter the course edit code, then choose Yes to delete this course.')
-        : t('This older course has no edit code. Use the universal code to delete it.'),
+      t('Enter the course edit code, then choose Yes to delete this course.'),
       errorMessage
     );
     if (answer === false) return false;
