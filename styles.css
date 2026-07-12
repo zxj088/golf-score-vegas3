@@ -333,6 +333,11 @@ textarea {
   background: var(--panel);
 }
 
+.control-panel > .toggle-row {
+  align-self: stretch;
+  min-height: 52px;
+}
+
 .toggle-row input {
   width: 18px;
   min-height: 18px;
