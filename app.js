@@ -806,22 +806,22 @@ function renderCourseParInputs(pars = currentCourse().pars, indexes = currentCou
       const value = optionIndex + 1;
       return `<option value="${value}">${value}</option>`;
     }).join('');
-    const indexOptions = Array.from({ length: 18 }, (_, optionIndex) => {
-      const value = optionIndex + 1;
-      return `<option value="${value}">${value}</option>`;
-    }).join('');
     row.innerHTML = `
       <span class="hole-label">${t('Hole {hole}', { hole: index + 1 })}</span>
       <span class="field-label">PAR</span>
       <span class="field-label">${t('Difficulty')}</span>
       <select class="course-par-input" required aria-label="${t('Hole {hole}', { hole: index + 1 })} ${t('Par')}">${parOptions}</select>
-      <select class="course-index-input" required aria-label="${t('Hole {hole}', { hole: index + 1 })} ${t('Index')}">${indexOptions}</select>
+      <select class="course-index-input" required aria-label="${t('Hole {hole}', { hole: index + 1 })} ${t('Index')}"></select>
     `;
     const [parInput, indexInput] = row.querySelectorAll('select');
     parInput.value = pars[index] || 4;
-    indexInput.value = indexes[index] || 9;
+    indexInput.dataset.value = String(indexes[index] || 9);
     parInput.addEventListener('input', updateCourseFormTotals);
     parInput.addEventListener('change', updateCourseFormTotals);
+    indexInput.addEventListener('change', () => {
+      indexInput.dataset.value = indexInput.value;
+      refreshCourseIndexOptions();
+    });
     if (index < 9) {
       els.frontNineList.append(row);
     } else {
@@ -829,7 +829,21 @@ function renderCourseParInputs(pars = currentCourse().pars, indexes = currentCou
     }
   });
 
+  refreshCourseIndexOptions();
   updateCourseFormTotals();
+}
+
+function refreshCourseIndexOptions() {
+  const inputs = courseIndexInputs();
+  const selected = inputs.map(input => Number(input.dataset.value || input.value)).filter(Number.isInteger);
+  inputs.forEach(input => {
+    const current = Number(input.dataset.value || input.value || 9);
+    const options = Array.from({ length: 18 }, (_, optionIndex) => optionIndex + 1)
+      .filter(value => value === current || !selected.includes(value));
+    input.innerHTML = options.map(value => `<option value="${value}">${value}</option>`).join('');
+    input.value = String(options.includes(current) ? current : options[0] || 9);
+    input.dataset.value = input.value;
+  });
 }
 
 function renderNewGameCourses() {
