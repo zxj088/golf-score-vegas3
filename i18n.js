@@ -135,6 +135,7 @@
     'Add your GolfCourseAPI key to supabase-config.js before searching.': '请先在 supabase-config.js 中添加 GolfCourseAPI 密钥。',
     'Searching courses...': '正在搜索球场...',
     'Choose a course to add.': '请选择要添加的球场。',
+    'No results matched the selected country or region. Showing all matches.': '没有匹配所选国家或地区的结果，已显示全部匹配结果。',
     'No courses found.': '没有找到球场。',
     'Course search failed. Try again.': '球场搜索失败，请重试。',
     'Loading course scorecard...': '正在读取球场记分卡...',

@@ -1005,17 +1005,21 @@ function courseSearchId(result) {
   return result?.id || result?.course_id || result?.courseId;
 }
 
+function courseMatchesArea(result, country, region) {
+  const address = result?.location || result?.address || {};
+  const countryText = String(address.country || result?.country || '').toLowerCase();
+  const regionText = String(address.state || address.region || address.province || address.city || address.county || '').toLowerCase();
+  const expectedCountry = String(country || '').trim().toLowerCase();
+  const expectedRegion = String(region || '').trim().toLowerCase();
+  return (!expectedCountry || countryText.includes(expectedCountry)) && (!expectedRegion || regionText.includes(expectedRegion));
+}
+
 async function searchGolfCourses({ courseName, country, region }) {
   if (!hasGolfCourseApiConfig()) throw new Error('GolfCourseAPI key is missing');
   const config = golfCourseApiConfig();
   const name = String(courseName || '').trim();
-  const area = [region, country].map(value => String(value || '').trim()).filter(Boolean).join(' ');
   const resultLimit = country || region ? 20 : 30;
-  const searches = [
-    name,
-    [name, area].filter(Boolean).join(' '),
-    area
-  ].filter(Boolean);
+  const searches = [name].filter(Boolean);
   const queries = [...new Set(searches.length ? searches : ['golf'])];
   const unique = new Map();
   for (const searchQuery of queries) {
@@ -1027,7 +1031,12 @@ async function searchGolfCourses({ courseName, country, region }) {
     });
     if (unique.size >= resultLimit || (unique.size && name)) break;
   }
-  return Array.from(unique.values()).slice(0, resultLimit);
+  const results = Array.from(unique.values());
+  const filtered = (country || region) ? results.filter(row => courseMatchesArea(row, country, region)) : results;
+  return {
+    results: (filtered.length ? filtered : results).slice(0, resultLimit),
+    filterFallback: Boolean((country || region) && !filtered.length && results.length)
+  };
 }
 
 async function fetchGolfCourseDetail(result) {
@@ -2151,8 +2160,11 @@ function addListeners() {
     els.courseSearchStatus.textContent = t('Searching courses...');
     els.courseSearchResults.innerHTML = '';
     try {
-      const results = await searchGolfCourses({ courseName, country, region });
-      els.courseSearchStatus.textContent = results.length ? t('Choose a course to add.') : t('No courses found.');
+      const searchResult = await searchGolfCourses({ courseName, country, region });
+      const results = searchResult.results;
+      els.courseSearchStatus.textContent = results.length
+        ? t(searchResult.filterFallback ? 'No results matched the selected country or region. Showing all matches.' : 'Choose a course to add.')
+        : t('No courses found.');
       renderCourseSearchResults(results);
     } catch (error) {
       els.courseSearchStatus.textContent = hasGolfCourseApiConfig()
