@@ -734,7 +734,15 @@ input:disabled {
 
 .search-results {
   display: grid;
-  gap: 8px;
+  gap: 7px;
+}
+
+.search-group-title {
+  margin: 5px 0 -2px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .search-result {

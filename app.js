@@ -982,6 +982,14 @@ function courseSearchName(result) {
   return course || club || String(result?.display_name || '').split(',')[0] || t('Course');
 }
 
+function courseSearchClubName(result) {
+  return String(result?.club_name || result?.clubName || courseSearchName(result)).trim();
+}
+
+function courseSearchCourseName(result) {
+  return String(result?.course_name || result?.courseName || result?.name || courseSearchName(result)).trim();
+}
+
 function courseSearchAddress(result) {
   const address = result?.location || result?.address || {};
   return [
@@ -1090,7 +1098,16 @@ function renderCourseSearchResults(results) {
     els.courseSearchResults.append(empty);
     return;
   }
+  let currentClub = '';
   results.forEach(result => {
+    const clubName = courseSearchClubName(result);
+    if (clubName !== currentClub) {
+      currentClub = clubName;
+      const heading = document.createElement('div');
+      heading.className = 'search-group-title';
+      heading.textContent = clubName;
+      els.courseSearchResults.append(heading);
+    }
     const row = document.createElement('div');
     row.className = 'search-result';
     row.innerHTML = `
@@ -1101,8 +1118,10 @@ function renderCourseSearchResults(results) {
       <button type="button"></button>
     `;
     const name = courseSearchName(result);
-    row.querySelector('strong').textContent = name;
-    row.querySelector('span').textContent = courseSearchAddress(result);
+    const courseName = courseSearchCourseName(result);
+    const address = courseSearchAddress(result);
+    row.querySelector('strong').textContent = courseName;
+    row.querySelector('span').textContent = address ? `${clubName} | ${address}` : clubName;
     const button = row.querySelector('button');
     button.textContent = t('Add');
     button.addEventListener('click', async () => {
