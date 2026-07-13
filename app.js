@@ -20,18 +20,18 @@ const COURSE_SEARCH_AREAS = [
 ];
 
 const defaultCourses = [
-  { id: 'bro-hof-stadium', name: 'Bro Hof Stadium', pars: [5,4,4,3,4,4,3,4,5,4,3,5,5,4,5,3,3,4] },
-  { id: 'bro-hof-castle', name: 'Bro Hof Castle', pars: [5,3,4,3,5,4,3,4,5,5,3,3,5,4,5,4,3,4] },
-  { id: 'kungsangen-kings', name: 'Kungsangen Kings', pars: [4,4,3,4,4,4,3,5,4,4,3,4,3,5,3,4,4,5] },
-  { id: 'kungsangen-queens', name: 'Kungsangen Queens', pars: [4,4,3,4,3,4,4,5,4,5,3,4,5,3,4,4,4,3] },
-  { id: 'waxholm', name: 'Waxholm', pars: [4,5,3,4,4,4,4,5,4,4,3,4,4,4,5,4,5,3] },
-  { id: 'lindo-dal', name: 'Lindo Dal', pars: [4,3,4,3,4,5,4,4,5,4,3,4,4,3,4,4,3,5] },
-  { id: 'kyssinge', name: 'Kyssinge', pars: [4,5,5,4,3,4,4,3,5,4,5,4,4,5,3,4,3,5] },
-  { id: 'bodaholm', name: 'Bodaholm', pars: [4,4,3,5,4,3,4,3,5,5,4,4,4,3,4,3,4,5] },
-  { id: 'brollsta', name: 'Brollsta', pars: [4,4,4,5,4,3,4,3,5,5,3,4,3,4,4,5,4,4] },
-  { id: 'international', name: 'International', pars: [4,5,3,4,5,3,4,4,4,4,4,3,4,5,5,4,3,4] },
-  { id: 'lovsattrra', name: 'Lovsattrra', pars: [4,4,4,5,3,4,6,3,4,5,3,4,4,4,3,5,3,4] },
-  { id: 'riksten', name: 'Riksten', pars: [5,4,3,4,5,4,4,3,4,4,4,5,3,4,5,3,4,4] }
+  { id: 'bro-hof-stadium', name: 'Bro Hof Stadium', pars: [5,4,4,3,4,4,3,4,5,4,3,5,5,4,5,3,3,4], indexes: [8,4,18,16,2,14,12,10,6,9,15,13,7,3,1,11,5,17] },
+  { id: 'bro-hof-castle', name: 'Bro Hof Castle', pars: [5,3,4,3,5,4,3,4,5,5,3,3,5,4,5,4,3,4], indexes: [5,13,11,9,7,1,17,15,3,4,16,18,6,14,2,12,10,8] },
+  { id: 'kungsangen-kings', name: 'Kungsangen Kings', pars: [4,4,3,4,4,4,3,5,4,4,3,4,3,5,3,4,4,5], indexes: [5,7,15,1,3,13,17,9,11,10,16,4,6,12,18,8,14,2] },
+  { id: 'kungsangen-queens', name: 'Kungsangen Queens', pars: [4,4,3,4,3,4,4,5,4,5,3,4,5,3,4,4,4,3], indexes: [4,2,18,10,16,14,6,8,12,9,13,1,5,17,15,3,7,11] },
+  { id: 'waxholm', name: 'Waxholm', pars: [4,5,3,4,4,4,4,5,4,4,3,4,4,4,5,4,5,3], indexes: [18,4,8,10,6,14,16,12,2,11,13,3,17,9,1,7,15,5] },
+  { id: 'lindo-dal', name: 'Lindo Dal', pars: [4,3,4,3,4,5,4,4,5,4,3,4,4,3,4,4,3,5], indexes: [11,13,3,7,1,5,15,17,9,10,6,4,16,8,14,2,18,12] },
+  { id: 'kyssinge', name: 'Kyssinge', pars: [4,5,5,4,3,4,4,3,5,4,5,4,4,5,3,4,3,5], indexes: [11,17,5,9,13,15,1,7,3,4,2,12,14,6,8,16,18,10] },
+  { id: 'bodaholm', name: 'Bodaholm', pars: [4,4,3,5,4,3,4,3,5,5,4,4,4,3,4,3,4,5], indexes: [9,15,3,13,1,17,11,7,5,8,12,14,10,18,4,16,2,6] },
+  { id: 'brollsta', name: 'Brollsta', pars: [4,4,4,5,4,3,4,3,5,5,3,4,3,4,4,5,4,4], indexes: [16,4,6,12,18,8,2,14,10,11,15,9,7,3,1,17,13,5] },
+  { id: 'international', name: 'International', pars: [4,5,3,4,5,3,4,4,4,4,4,3,4,5,5,4,3,4], indexes: [11,7,9,1,13,3,5,17,15,2,6,18,12,16,8,4,10,14] },
+  { id: 'lovsattrra', name: 'Lovsattrra', pars: [4,4,4,5,3,4,3,4,3,4,3,4,4,4,3,5,3,4], indexes: [17,5,11,9,15,7,1,13,3,4,10,16,2,8,18,12,6,14] },
+  { id: 'riksten', name: 'Riksten', pars: [5,4,3,4,5,4,4,3,4,4,4,5,3,4,5,3,4,4], indexes: [7,9,17,3,1,13,5,15,11,12,2,6,18,14,4,16,8,10] }
 ];
 
 const defaultCourseMetadata = {
