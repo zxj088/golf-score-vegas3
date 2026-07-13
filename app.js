@@ -446,6 +446,7 @@ function courseToCloudRow(course) {
 function golfCourseApiConfig() {
   const raw = window.VEGAS_SUPABASE?.golfCourseApi || {};
   return {
+    proxyUrl: String(raw.proxyUrl || '').trim().replace(/\/+$/, ''),
     baseUrl: String(raw.baseUrl || 'https://api.golfcourseapi.com/v1').trim().replace(/\/+$/, ''),
     searchPath: String(raw.searchPath || '/search').trim() || '/search',
     coursePathTemplate: String(raw.coursePathTemplate || '/courses/{id}').trim() || '/courses/{id}',
@@ -455,7 +456,7 @@ function golfCourseApiConfig() {
 
 function hasGolfCourseApiConfig() {
   const config = golfCourseApiConfig();
-  return Boolean(config.baseUrl && config.apiKey && !config.apiKey.includes('PASTE'));
+  return Boolean(config.proxyUrl || (config.baseUrl && config.apiKey && !config.apiKey.includes('PASTE')));
 }
 
 async function golfCourseApiRequest(path, params = {}) {
@@ -463,11 +464,13 @@ async function golfCourseApiRequest(path, params = {}) {
   const query = new URLSearchParams(params);
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const queryText = query.toString();
-  const response = await fetch(`${config.baseUrl}${cleanPath}${queryText ? `?${queryText}` : ''}`, {
-    headers: {
-      Authorization: `Key ${config.apiKey}`
-    }
-  });
+  const proxyQuery = new URLSearchParams({ path: cleanPath });
+  Object.entries(params).forEach(([key, value]) => proxyQuery.set(key, value));
+  const url = config.proxyUrl
+    ? `${config.proxyUrl}?${proxyQuery.toString()}`
+    : `${config.baseUrl}${cleanPath}${queryText ? `?${queryText}` : ''}`;
+  const headers = config.proxyUrl ? {} : { Authorization: `Key ${config.apiKey}` };
+  const response = await fetch(url, { headers });
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || response.statusText);
