@@ -469,7 +469,13 @@ async function golfCourseApiRequest(path, params = {}) {
   const url = config.proxyUrl
     ? `${config.proxyUrl}?${proxyQuery.toString()}`
     : `${config.baseUrl}${cleanPath}${queryText ? `?${queryText}` : ''}`;
-  const headers = config.proxyUrl ? {} : { Authorization: `Key ${config.apiKey}` };
+  const supabase = supabaseConfig();
+  const headers = config.proxyUrl
+    ? {
+      apikey: supabase.anonKey,
+      Authorization: `Bearer ${supabase.anonKey}`
+    }
+    : { Authorization: `Key ${config.apiKey}` };
   const response = await fetch(url, { headers });
   if (!response.ok) {
     const message = await response.text();
