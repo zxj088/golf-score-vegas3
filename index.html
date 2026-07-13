@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1f6f5b">
   <title>Vegas Golf Scorecard</title>
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=48">
+  <link rel="stylesheet" href="./styles.css?v=50">
 </head>
 <body>
   <div class="app-shell">
@@ -175,6 +175,42 @@
     </form>
   </div>
 
+  <div class="course-modal" id="courseSearchModal" hidden>
+    <form class="course-form search-form" id="courseSearchForm">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">Course Search</p>
+          <h2>Search Course</h2>
+        </div>
+        <button class="icon-button" id="cancelCourseSearch" type="button" aria-label="Close course search" title="Close">x</button>
+      </div>
+
+      <div class="search-filters">
+        <label>
+          Country
+          <select id="courseSearchCountry"></select>
+        </label>
+        <label>
+          Region
+          <select id="courseSearchRegion"></select>
+        </label>
+      </div>
+
+      <label>
+        Course name or city
+        <input id="courseSearchInput" type="search" autocomplete="off" placeholder="Bro Hof, Stockholm, Las Vegas">
+      </label>
+
+      <div class="action-row">
+        <button class="primary" id="courseSearchSubmit" type="submit">Search</button>
+        <button type="button" id="cancelCourseSearchBottom">Cancel</button>
+      </div>
+
+      <p class="search-status" id="courseSearchStatus">Search the course API, then add one to your courses.</p>
+      <div class="search-results" id="courseSearchResults"></div>
+    </form>
+  </div>
+
   <div class="course-modal" id="gameModal" hidden>
     <form class="course-form game-form" id="gameForm">
       <div class="modal-head">
@@ -305,8 +341,8 @@
     </form>
   </div>
 
-  <script src="./i18n.js?v=48" defer></script>
-  <script src="./supabase-config.js?v=48"></script>
-  <script src="./app.js?v=48" defer></script>
+  <script src="./i18n.js?v=50" defer></script>
+  <script src="./supabase-config.js?v=50"></script>
+  <script src="./app.js?v=50" defer></script>
 </body>
 </html>

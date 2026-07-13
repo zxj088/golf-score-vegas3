@@ -7,6 +7,17 @@ const DELETE_KEY = 'vegasGolfDeletedRounds.v1';
 const GAME_LIMIT = 200;
 const CLOUD_ROUND_LIMIT = 1000;
 const EDIT_LOCK_TTL_MS = 12000;
+const COURSE_SEARCH_AREAS = [
+  { country: 'Sweden', regions: ['Stockholm County', 'Uppsala County', 'Sodermanland County', 'Vastra Gotaland County', 'Skane County', 'Halland County'] },
+  { country: 'United States', regions: ['Nevada', 'California', 'Florida', 'Arizona', 'Texas', 'New York', 'Hawaii'] },
+  { country: 'China', regions: ['Beijing', 'Shanghai', 'Guangdong', 'Hainan', 'Yunnan', 'Zhejiang', 'Jiangsu'] },
+  { country: 'Thailand', regions: ['Bangkok', 'Chon Buri', 'Phuket', 'Chiang Mai', 'Hua Hin'] },
+  { country: 'Japan', regions: ['Tokyo', 'Chiba', 'Kanagawa', 'Hokkaido', 'Okinawa'] },
+  { country: 'Spain', regions: ['Andalusia', 'Catalonia', 'Madrid', 'Valencian Community', 'Balearic Islands'] },
+  { country: 'United Kingdom', regions: ['England', 'Scotland', 'Wales', 'Northern Ireland'] },
+  { country: 'Canada', regions: ['Ontario', 'British Columbia', 'Quebec', 'Alberta'] },
+  { country: 'Australia', regions: ['New South Wales', 'Victoria', 'Queensland', 'Western Australia'] }
+];
 
 const defaultCourses = [
   { id: 'bro-hof-stadium', name: 'Bro Hof Stadium', pars: [5,4,4,3,4,4,3,4,5,4,3,5,5,4,5,3,3,4] },
@@ -86,6 +97,16 @@ const els = {
   addCourse: document.querySelector('#addCourse'),
   courseModal: document.querySelector('#courseModal'),
   courseForm: document.querySelector('#courseForm'),
+  courseSearchModal: document.querySelector('#courseSearchModal'),
+  courseSearchForm: document.querySelector('#courseSearchForm'),
+  courseSearchCountry: document.querySelector('#courseSearchCountry'),
+  courseSearchRegion: document.querySelector('#courseSearchRegion'),
+  courseSearchInput: document.querySelector('#courseSearchInput'),
+  courseSearchSubmit: document.querySelector('#courseSearchSubmit'),
+  courseSearchStatus: document.querySelector('#courseSearchStatus'),
+  courseSearchResults: document.querySelector('#courseSearchResults'),
+  cancelCourseSearch: document.querySelector('#cancelCourseSearch'),
+  cancelCourseSearchBottom: document.querySelector('#cancelCourseSearchBottom'),
   newCourseName: document.querySelector('#newCourseName'),
   newCourseCode: document.querySelector('#newCourseCode'),
   courseModalEyebrow: document.querySelector('#courseModalEyebrow'),
@@ -420,6 +441,38 @@ function courseToCloudRow(course) {
       editCode: String(course.editCode || '')
     }
   };
+}
+
+function golfCourseApiConfig() {
+  const raw = window.VEGAS_SUPABASE?.golfCourseApi || {};
+  return {
+    baseUrl: String(raw.baseUrl || 'https://api.golfcourseapi.com/v1').trim().replace(/\/+$/, ''),
+    searchPath: String(raw.searchPath || '/search').trim() || '/search',
+    coursePathTemplate: String(raw.coursePathTemplate || '/courses/{id}').trim() || '/courses/{id}',
+    apiKey: String(raw.apiKey || '').trim()
+  };
+}
+
+function hasGolfCourseApiConfig() {
+  const config = golfCourseApiConfig();
+  return Boolean(config.baseUrl && config.apiKey && !config.apiKey.includes('PASTE'));
+}
+
+async function golfCourseApiRequest(path, params = {}) {
+  const config = golfCourseApiConfig();
+  const query = new URLSearchParams(params);
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const queryText = query.toString();
+  const response = await fetch(`${config.baseUrl}${cleanPath}${queryText ? `?${queryText}` : ''}`, {
+    headers: {
+      Authorization: `Key ${config.apiKey}`
+    }
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || response.statusText);
+  }
+  return response.json();
 }
 
 function cloudRowToCourse(row) {
@@ -869,7 +922,20 @@ function renderNewGameCourses() {
   els.newGameCourse.value = state.courseId;
 }
 
-function openCourseModal() {
+function renderCourseSearchCountries() {
+  els.courseSearchCountry.innerHTML = COURSE_SEARCH_AREAS.map(area => `<option value="${area.country}">${area.country}</option>`).join('');
+  els.courseSearchCountry.value = COURSE_SEARCH_AREAS[0].country;
+  renderCourseSearchRegions();
+}
+
+function renderCourseSearchRegions() {
+  const area = COURSE_SEARCH_AREAS.find(item => item.country === els.courseSearchCountry.value) || COURSE_SEARCH_AREAS[0];
+  const options = [`<option value="">${t('All regions')}</option>`]
+    .concat(area.regions.map(region => `<option value="${region}">${region}</option>`));
+  els.courseSearchRegion.innerHTML = options.join('');
+}
+
+function openCourseModal(prefillName = '') {
   els.courseForm.reset();
   editingCourseId = '';
   renderCourseParInputs(Array.from({ length: 18 }, () => 4), Array.from({ length: 18 }, (_, index) => index + 1));
@@ -877,8 +943,179 @@ function openCourseModal() {
   document.querySelector('#courseModal h2').textContent = t('Add Course');
   els.courseForm.querySelector('button[type="submit"]').textContent = t('Save Course');
   els.newCourseCode.disabled = false;
+  if (prefillName) els.newCourseName.value = prefillName;
   els.courseModal.hidden = false;
-  els.newCourseName.focus();
+  (prefillName ? els.newCourseCode : els.newCourseName).focus();
+}
+
+function openCourseSearchModal() {
+  els.courseSearchForm.reset();
+  renderCourseSearchCountries();
+  els.courseSearchResults.innerHTML = '';
+  els.courseSearchStatus.textContent = hasGolfCourseApiConfig()
+    ? t('Search the course API, then add one to your courses.')
+    : t('Add your GolfCourseAPI key to supabase-config.js before searching.');
+  els.courseSearchSubmit.disabled = false;
+  els.courseSearchModal.hidden = false;
+  els.courseSearchInput.focus();
+}
+
+function closeCourseSearchModal() {
+  els.courseSearchModal.hidden = true;
+  els.courseSearchForm.reset();
+  els.courseSearchResults.innerHTML = '';
+}
+
+function courseSearchName(result) {
+  const club = String(result?.club_name || result?.clubName || '').trim();
+  const course = String(result?.course_name || result?.courseName || result?.name || '').trim();
+  if (club && course && club !== course) return `${club} - ${course}`;
+  return course || club || String(result?.display_name || '').split(',')[0] || t('Course');
+}
+
+function courseSearchAddress(result) {
+  const address = result?.location || result?.address || {};
+  return [
+    address.city || address.town || address.village || address.municipality || address.county,
+    address.state || address.region || address.province,
+    address.country || result?.country
+  ].filter(Boolean).join(', ') || String(result?.display_name || '');
+}
+
+function courseSearchId(result) {
+  return result?.id || result?.course_id || result?.courseId;
+}
+
+async function searchGolfCourses({ query, country, region }) {
+  if (!hasGolfCourseApiConfig()) throw new Error('GolfCourseAPI key is missing');
+  const config = golfCourseApiConfig();
+  const parts = [query, region, country].map(value => String(value || '').trim()).filter(Boolean);
+  const searchQuery = parts.join(' ') || country || 'golf';
+  const data = await golfCourseApiRequest(config.searchPath, { search_query: searchQuery });
+  const rows = Array.isArray(data) ? data : (Array.isArray(data?.courses) ? data.courses : []);
+  const unique = new Map();
+  rows.forEach(row => {
+    const key = String(courseSearchId(row) || courseSearchName(row));
+    if (!unique.has(key)) unique.set(key, row);
+  });
+  return Array.from(unique.values()).slice(0, 8);
+}
+
+async function fetchGolfCourseDetail(result) {
+  const id = courseSearchId(result);
+  if (!id) return result;
+  const config = golfCourseApiConfig();
+  const path = config.coursePathTemplate.replace('{id}', encodeURIComponent(id));
+  try {
+    return await golfCourseApiRequest(path);
+  } catch {
+    return result;
+  }
+}
+
+function numberFrom(value) {
+  const number = Number(value);
+  return Number.isInteger(number) ? number : null;
+}
+
+function readHolePar(hole) {
+  return numberFrom(hole?.par ?? hole?.Par ?? hole?.hole_par);
+}
+
+function readHoleIndex(hole) {
+  return numberFrom(hole?.handicap ?? hole?.hcp ?? hole?.index ?? hole?.stroke_index ?? hole?.strokeIndex ?? hole?.handicap_index ?? hole?.handicapIndex ?? hole?.hole_handicap);
+}
+
+function holeNumber(hole, fallback) {
+  return numberFrom(hole?.hole ?? hole?.hole_number ?? hole?.number ?? hole?.Hole) || fallback;
+}
+
+function findScorecardHoles(value, depth = 0) {
+  if (!value || depth > 6) return null;
+  if (Array.isArray(value)) {
+    const holeRows = value.filter(item => item && typeof item === 'object' && readHolePar(item));
+    if (holeRows.length >= 18) return holeRows.slice(0, 18);
+    for (const item of value) {
+      const found = findScorecardHoles(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof value === 'object') {
+    const preferredKeys = ['holes', 'scorecard', 'tee_boxes', 'teeBoxes', 'tees', 'male', 'female'];
+    for (const key of preferredKeys) {
+      const found = findScorecardHoles(value[key], depth + 1);
+      if (found) return found;
+    }
+    for (const item of Object.values(value)) {
+      const found = findScorecardHoles(item, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function scorecardFromApiCourse(course) {
+  const holes = findScorecardHoles(course);
+  if (!holes) return null;
+  const ordered = holes
+    .map((hole, index) => ({ hole, number: holeNumber(hole, index + 1) }))
+    .sort((a, b) => a.number - b.number)
+    .slice(0, 18)
+    .map(item => item.hole);
+  const pars = ordered.map(readHolePar);
+  const indexes = ordered.map(readHoleIndex);
+  if (pars.length !== 18 || pars.some(par => !Number.isInteger(par) || par < 1 || par > 10)) return null;
+  if (indexes.length !== 18 || indexes.some(index => !Number.isInteger(index) || index < 1 || index > 18)) {
+    return { pars, indexes: Array.from({ length: 18 }, (_, index) => index + 1) };
+  }
+  return { pars, indexes };
+}
+
+function renderCourseSearchResults(results) {
+  els.courseSearchResults.innerHTML = '';
+  if (!results.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = t('No courses found.');
+    els.courseSearchResults.append(empty);
+    return;
+  }
+  results.forEach(result => {
+    const row = document.createElement('div');
+    row.className = 'search-result';
+    row.innerHTML = `
+      <div>
+        <strong></strong>
+        <span></span>
+      </div>
+      <button type="button"></button>
+    `;
+    const name = courseSearchName(result);
+    row.querySelector('strong').textContent = name;
+    row.querySelector('span').textContent = courseSearchAddress(result);
+    const button = row.querySelector('button');
+    button.textContent = t('Add');
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      els.courseSearchStatus.textContent = t('Loading course scorecard...');
+      const detail = await fetchGolfCourseDetail(result);
+      const scorecard = scorecardFromApiCourse(detail);
+      if (!scorecard) {
+        button.disabled = false;
+        els.courseSearchStatus.textContent = t('Could not read PAR and INDEX from this course.');
+        return;
+      }
+      closeCourseSearchModal();
+      openCourseModalFromApi(name, scorecard.pars, scorecard.indexes);
+    });
+    els.courseSearchResults.append(row);
+  });
+}
+
+function openCourseModalFromApi(name, pars, indexes) {
+  openCourseModal(name);
+  renderCourseParInputs(pars, indexes);
 }
 
 function openEditCourseModal(course) {
@@ -1858,8 +2095,32 @@ function addListeners() {
   });
 
   els.addCourse.addEventListener('click', openCourseModal);
-  els.searchCourse.addEventListener('click', () => {
-    showMessage(t('Search Course'), t('Global course search needs a GolfCourseAPI key before it can be enabled.'));
+  els.searchCourse.addEventListener('click', openCourseSearchModal);
+  els.courseSearchCountry.addEventListener('change', renderCourseSearchRegions);
+  els.cancelCourseSearch.addEventListener('click', closeCourseSearchModal);
+  els.cancelCourseSearchBottom.addEventListener('click', closeCourseSearchModal);
+  els.courseSearchModal.addEventListener('click', event => {
+    if (event.target === els.courseSearchModal) closeCourseSearchModal();
+  });
+  els.courseSearchForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const query = els.courseSearchInput.value.trim();
+    const country = els.courseSearchCountry.value;
+    const region = els.courseSearchRegion.value;
+    els.courseSearchSubmit.disabled = true;
+    els.courseSearchStatus.textContent = t('Searching courses...');
+    els.courseSearchResults.innerHTML = '';
+    try {
+      const results = await searchGolfCourses({ query, country, region });
+      els.courseSearchStatus.textContent = results.length ? t('Choose a course to add.') : t('No courses found.');
+      renderCourseSearchResults(results);
+    } catch (error) {
+      els.courseSearchStatus.textContent = hasGolfCourseApiConfig()
+        ? t('Course search failed. Try again.')
+        : t('Add your GolfCourseAPI key to supabase-config.js before searching.');
+    } finally {
+      els.courseSearchSubmit.disabled = false;
+    }
   });
   els.cancelCourse.addEventListener('click', closeCourseModal);
   els.cancelCourseBottom.addEventListener('click', closeCourseModal);
