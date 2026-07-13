@@ -114,6 +114,8 @@
     'Enter code, then choose Yes to edit this game.': '输入密码，然后选择“是”以编辑此比赛。',
     'Finish game': '结束比赛',
     'Enter code, then choose Yes to finish this game.': '输入密码，然后选择“是”以结束此比赛。',
+    'Save game changes': '保存比赛修改',
+    'Enter code, then choose Yes to save these changes.': '输入密码，然后选择“是”以保存这些修改。',
     'Delete game': '删除比赛',
     'Enter code, then choose Yes to delete this finished game.': '输入密码，然后选择“是”以删除此已结束的比赛。',
     'Delete course': '删除球场',
