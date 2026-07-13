@@ -2429,7 +2429,9 @@ function openAppDialog({
   maxLength = '',
   pattern = '',
   okText = 'OK',
-  cancelText = t('Cancel')
+  cancelText = t('Cancel'),
+  showOk = true,
+  showCancel = true
 }) {
   return new Promise(resolve => {
     dialogResolver = resolve;
@@ -2438,6 +2440,8 @@ function openAppDialog({
     els.dialogMessage.textContent = message;
     els.dialogOk.textContent = okText;
     els.dialogCancel.textContent = cancelText;
+    els.dialogOk.hidden = !showOk;
+    els.dialogCancel.hidden = !showCancel;
     els.dialogInputWrap.hidden = !input;
     els.dialogInputLabel.textContent = inputLabel;
     els.dialogInput.value = '';
@@ -2446,7 +2450,8 @@ function openAppDialog({
     els.dialogInput.pattern = pattern;
     els.appDialog.hidden = false;
     if (input) els.dialogInput.focus();
-    else els.dialogOk.focus();
+    else if (showOk) els.dialogOk.focus();
+    else if (showCancel) els.dialogCancel.focus();
   });
 }
 
@@ -2640,6 +2645,17 @@ function renderInputs() {
   els.players.forEach((input, index) => {
     input.value = state.players[index];
     input.readOnly = true;
+  });
+}
+
+async function showRulesDialog() {
+  await openAppDialog({
+    eyebrow: t('Notice'),
+    title: t('Las Vegas Rules'),
+    message: t(LAS_VEGAS_RULES_TEXT),
+    input: false,
+    showOk: false,
+    cancelText: t('Close')
   });
 }
 
@@ -2967,7 +2983,7 @@ function addListeners() {
   });
 
   els.rulesButton.addEventListener('click', () => {
-    showMessage(t('Las Vegas Rules'), t(LAS_VEGAS_RULES_TEXT));
+    showRulesDialog();
   });
 
   els.dialogForm.addEventListener('submit', event => {
