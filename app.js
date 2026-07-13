@@ -4,6 +4,7 @@ const HISTORY_KEY = 'vegasGolfHistory.v1';
 const COURSE_KEY = 'vegasGolfCourses.v1';
 const CLIENT_KEY = 'vegasGolfClientId.v1';
 const DELETE_KEY = 'vegasGolfDeletedRounds.v1';
+const COURSE_DELETE_KEY = 'vegasGolfDeletedCourses.v1';
 const GAME_LIMIT = 200;
 const CLOUD_ROUND_LIMIT = 1000;
 const EDIT_LOCK_TTL_MS = 12000;
@@ -412,6 +413,7 @@ let state = {
 let customCourses = [];
 let savedRounds = [];
 let deletedRoundKeys = [];
+let deletedCourseIds = [];
 let syncState = {
   ready: false,
   busy: false,
@@ -617,6 +619,10 @@ function saveDeletedRoundKeys() {
   localStorage.setItem(DELETE_KEY, JSON.stringify(deletedRoundKeys.slice(-GAME_LIMIT)));
 }
 
+function saveDeletedCourseIds() {
+  localStorage.setItem(COURSE_DELETE_KEY, JSON.stringify(deletedCourseIds.slice(-GAME_LIMIT)));
+}
+
 function slugify(value) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `course-${Date.now()}`;
 }
@@ -674,6 +680,18 @@ function markRoundDeleted(round) {
 
 function isRoundDeleted(round) {
   return deletedRoundKeys.includes(roundDeleteKey(round));
+}
+
+function markCourseDeleted(courseId) {
+  const id = String(courseId || '').trim();
+  if (!id || deletedCourseIds.includes(id)) return;
+  deletedCourseIds = [...deletedCourseIds, id].slice(-GAME_LIMIT);
+  saveDeletedCourseIds();
+}
+
+function isCourseDeleted(courseOrId) {
+  const id = typeof courseOrId === 'string' ? courseOrId : courseOrId?.id;
+  return deletedCourseIds.includes(String(id || ''));
 }
 
 function editLock(round) {
@@ -874,6 +892,24 @@ function cloudRowToCourse(row) {
   };
 }
 
+function isCourseDeleteMarkerRow(row) {
+  return Boolean(row?.pars?.deleted);
+}
+
+function courseDeleteMarkerToCloudRow(courseId) {
+  const id = String(courseId || '');
+  return {
+    id: cloudId('course', id),
+    sync_key: supabaseConfig().syncKey,
+    course_id: id,
+    name: `Deleted ${id}`,
+    pars: {
+      deleted: true,
+      deletedAt: Date.now()
+    }
+  };
+}
+
 function roundToCloudRow(round) {
   const normalized = normalizeRound(round);
   return {
@@ -1019,7 +1055,13 @@ function renderSyncStatus() {
 async function fetchCloudCourses() {
   const query = `select=*&sync_key=eq.${encodeURIComponent(supabaseConfig().syncKey)}&order=name.asc`;
   const rows = await supabaseRequest('vegas_courses', query);
-  return rows.map(cloudRowToCourse).filter(course => course.pars.length === 18);
+  rows
+    .filter(isCourseDeleteMarkerRow)
+    .forEach(row => markCourseDeleted(row.course_id));
+  return rows
+    .filter(row => !isCourseDeleteMarkerRow(row))
+    .map(cloudRowToCourse)
+    .filter(course => course.pars.length === 18 && !isCourseDeleted(course));
 }
 
 async function fetchCloudRounds() {
@@ -1049,6 +1091,7 @@ async function fetchCloudRoundById(roundId) {
 
 async function upsertCloudCourse(course) {
   if (!hasSupabaseConfig()) return;
+  if (isCourseDeleted(course)) return;
   await supabaseRequest('vegas_courses', 'on_conflict=id', {
     method: 'POST',
     body: courseToCloudRow(course),
@@ -1088,11 +1131,23 @@ async function uploadLocalDeleteMarkers() {
   );
 }
 
+async function uploadLocalCourseDeleteMarkers() {
+  if (!hasSupabaseConfig() || !deletedCourseIds.length) return;
+  await Promise.all(
+    deletedCourseIds.map(courseId => supabaseRequest('vegas_courses', 'on_conflict=id', {
+      method: 'POST',
+      body: courseDeleteMarkerToCloudRow(courseId),
+      prefer: 'resolution=merge-duplicates,return=minimal'
+    }))
+  );
+}
+
 async function deleteCloudCourse(courseId) {
   if (!hasSupabaseConfig()) return;
-  await supabaseRequest('vegas_courses', `id=eq.${encodeURIComponent(cloudId('course', courseId))}`, {
-    method: 'DELETE',
-    prefer: 'return=minimal'
+  await supabaseRequest('vegas_courses', 'on_conflict=id', {
+    method: 'POST',
+    body: courseDeleteMarkerToCloudRow(courseId),
+    prefer: 'resolution=merge-duplicates,return=minimal'
   });
 }
 
@@ -1155,6 +1210,8 @@ async function syncFromCloud(pushLocal = true, quiet = false) {
 
   try {
     await uploadLocalDeleteMarkers();
+    await uploadLocalCourseDeleteMarkers();
+    customCourses = customCourses.filter(course => !isCourseDeleted(course));
     if (pushLocal) await Promise.all(userEditableCourses().map(upsertCloudCourse));
 
     const [cloudCourses, cloudRounds] = await Promise.all([
@@ -1162,7 +1219,7 @@ async function syncFromCloud(pushLocal = true, quiet = false) {
       fetchCloudRounds()
     ]);
 
-    customCourses = mergeById(customCourses, cloudCourses);
+    customCourses = mergeById(customCourses, cloudCourses).filter(course => !isCourseDeleted(course));
     savedRounds = serverRounds(cloudRounds);
     if (activeGameId && !isEditing && savedRounds.some(round => round.id === activeGameId)) {
       applyGameToState(savedRounds.find(round => round.id === activeGameId));
@@ -2357,6 +2414,7 @@ function renderCourses() {
       deleteButton.textContent = t('Delete');
       deleteButton.addEventListener('click', async () => {
         if (!(await confirmDeleteCourseWithCode(course))) return;
+        markCourseDeleted(course.id);
         customCourses = customCourses.filter(item => item.id !== course.id);
         saveCoursesLocal();
         if (state.courseId === course.id) state.courseId = defaultCourses[0].id;
@@ -2812,6 +2870,7 @@ function init() {
   const cloudReady = hasSupabaseConfig();
   customCourses = loadJson(COURSE_KEY, []);
   deletedRoundKeys = loadJson(DELETE_KEY, []);
+  deletedCourseIds = loadJson(COURSE_DELETE_KEY, []);
   savedRounds = cloudReady ? [] : loadJson(HISTORY_KEY, []).map(normalizeRound).filter(round => !isRoundDeleted(round));
   if (cloudReady) saveHistoryLocal();
   const savedState = loadJson(STORAGE_KEY, {});
