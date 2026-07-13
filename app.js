@@ -8,6 +8,8 @@ const COURSE_DELETE_KEY = 'vegasGolfDeletedCourses.v1';
 const GAME_LIMIT = 200;
 const CLOUD_ROUND_LIMIT = 1000;
 const EDIT_LOCK_TTL_MS = 12000;
+const DEFAULT_COURSE_COUNTRY = 'Sweden';
+const DEFAULT_COURSE_REGION = 'Stockholm County';
 const COURSE_SEARCH_AREAS = [
     {
         "country":  "Australia",
@@ -493,6 +495,8 @@ const els = {
   newHandicapA2: document.querySelector('#newHandicapA2'),
   newHandicapB1: document.querySelector('#newHandicapB1'),
   newHandicapB2: document.querySelector('#newHandicapB2'),
+  newGameCountry: document.querySelector('#newGameCountry'),
+  newGameRegion: document.querySelector('#newGameRegion'),
   newGameCourse: document.querySelector('#newGameCourse'),
   newGameCode: document.querySelector('#newGameCode'),
   newGameTeeTime: document.querySelector('#newGameTeeTime'),
@@ -1360,15 +1364,74 @@ function updateCourseIndexValidation() {
   return !hasDuplicate;
 }
 
-function renderNewGameCourses() {
+function courseCountry(course) {
+  return String(course.country || '').trim();
+}
+
+function courseRegion(course) {
+  return String(course.region || '').trim();
+}
+
+function courseMatchesAreaFilters(course, country, region) {
+  return (!country || courseCountry(course) === country) && (!region || courseRegion(course) === region);
+}
+
+function areaForCourse(course) {
+  const normalized = normalizeCourse(course);
+  return {
+    country: courseCountry(normalized) || DEFAULT_COURSE_COUNTRY,
+    region: courseRegion(normalized) || DEFAULT_COURSE_REGION
+  };
+}
+
+function renderNewGameCountries(selected = DEFAULT_COURSE_COUNTRY) {
+  els.newGameCountry.innerHTML = [`<option value="">${t('All countries')}</option>`].concat(COURSE_SEARCH_AREAS
+    .map(area => `<option value="${area.country}">${area.country}</option>`)
+  ).join('');
+  els.newGameCountry.value = COURSE_SEARCH_AREAS.some(area => area.country === selected)
+    ? selected
+    : '';
+}
+
+function renderNewGameRegions(selected = DEFAULT_COURSE_REGION) {
+  const area = COURSE_SEARCH_AREAS.find(item => item.country === els.newGameCountry.value) || COURSE_SEARCH_AREAS[0];
+  const regions = els.newGameCountry.value ? (area?.regions || []) : [];
+  els.newGameRegion.innerHTML = [`<option value="">${t('All regions')}</option>`].concat(regions
+    .map(region => `<option value="${region}">${region}</option>`)
+  ).join('');
+  els.newGameRegion.value = regions.includes(selected)
+    ? selected
+    : (regions.includes(DEFAULT_COURSE_REGION) ? DEFAULT_COURSE_REGION : '');
+}
+
+function setNewGameArea(country = DEFAULT_COURSE_COUNTRY, region = DEFAULT_COURSE_REGION) {
+  renderNewGameCountries(country);
+  renderNewGameRegions(region);
+}
+
+function renderNewGameCourses(preferredCourseId = state.courseId) {
+  const country = els.newGameCountry.value;
+  const region = els.newGameRegion.value;
+  const courses = allCourses().filter(course => courseMatchesAreaFilters(course, country, region));
   els.newGameCourse.innerHTML = '';
-  allCourses().forEach(course => {
+  if (!courses.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = t('No courses for selected filters');
+    els.newGameCourse.append(option);
+    els.newGameCourse.disabled = true;
+    return;
+  }
+  els.newGameCourse.disabled = false;
+  courses.forEach(course => {
     const option = document.createElement('option');
     option.value = course.id;
     option.textContent = course.name;
     els.newGameCourse.append(option);
   });
-  els.newGameCourse.value = state.courseId;
+  els.newGameCourse.value = courses.some(course => course.id === preferredCourseId)
+    ? preferredCourseId
+    : courses[0].id;
 }
 
 function renderCourseSearchCountries() {
@@ -1707,7 +1770,8 @@ function closeCourseModal() {
 function openGameModal() {
   els.gameForm.reset();
   editingGameInfoId = '';
-  renderNewGameCourses();
+  setNewGameArea(DEFAULT_COURSE_COUNTRY, DEFAULT_COURSE_REGION);
+  renderNewGameCourses(state.courseId);
   els.newGameBirdieFlip.checked = true;
   els.newGameScoreMode.value = 'gross';
   els.newGameTeeTime.value = dateTimeInputValue(new Date());
@@ -1729,8 +1793,10 @@ function openEditGameInfoModal(round) {
   const normalized = normalizeRound(round);
   editingGameInfoId = normalized.id;
   els.gameForm.reset();
-  renderNewGameCourses();
-  els.newGameCourse.value = normalized.courseId;
+  const course = allCourses().find(item => item.id === normalized.courseId) || currentCourse();
+  const area = areaForCourse(course);
+  setNewGameArea(area.country, area.region);
+  renderNewGameCourses(normalized.courseId);
   els.newGameBirdieFlip.checked = normalized.underParFlip;
   els.newGameScoreMode.value = normalized.scoreMode;
   els.newGameTeeTime.value = normalized.totals.teeTime || dateTimeInputValue(new Date(normalized.savedAt));
@@ -2382,23 +2448,32 @@ function renderHoles() {
 
 function renderCourses() {
   els.courseList.innerHTML = '';
-  allCourses().forEach(course => {
+  allCourses()
+    .slice()
+    .sort((a, b) => [courseCountry(a), courseRegion(a), a.name].join('|').localeCompare([courseCountry(b), courseRegion(b), b.name].join('|')))
+    .forEach(course => {
     const row = document.createElement('div');
     row.className = 'course-row';
     const isShared = course.source === 'shared';
     const isCustom = customCourses.some(item => item.id === course.id && normalizeCourse(item).source !== 'shared');
     row.innerHTML = `
-      <div>
+      <div class="course-copy">
         <strong></strong>
-        <span></span>
+        <span class="course-meta"></span>
+        <span class="course-badges">
+          <span class="course-badge course-par-badge"></span>
+          <span class="course-badge course-type-badge"></span>
+        </span>
       </div>
       <div class="small-actions"></div>
     `;
     row.querySelector('strong').textContent = course.name;
-    row.querySelector('span').textContent = t('Par {par} - {type}', {
-      par: course.pars.reduce((a, b) => a + b, 0),
-      type: t(isShared ? 'Shared' : (isCustom ? 'Custom' : 'Preset'))
-    });
+    row.querySelector('.course-meta').textContent = [
+      course.club && course.course ? `${course.club} - ${course.course}` : (course.club || course.course),
+      [courseCountry(course), courseRegion(course)].filter(Boolean).join(', ')
+    ].filter(Boolean).join(' | ');
+    row.querySelector('.course-par-badge').textContent = t('Par {value}', { value: course.pars.reduce((a, b) => a + b, 0) });
+    row.querySelector('.course-type-badge').textContent = t(isShared ? 'Shared' : (isCustom ? 'Custom' : 'Preset'));
 
     if (isCustom) {
       const editButton = document.createElement('button');
@@ -2665,7 +2740,7 @@ function addListeners() {
     });
   });
 
-  els.addCourse.addEventListener('click', openCourseModal);
+  els.addCourse.addEventListener('click', () => openCourseModal());
   els.searchCourse.addEventListener('click', openCourseSearchModal);
   els.courseSearchModes.forEach(button => {
     button.addEventListener('click', () => setCourseSearchMode(button.dataset.courseSearchMode));
@@ -2780,6 +2855,11 @@ function addListeners() {
   });
 
   els.newGame.addEventListener('click', openGameModal);
+  els.newGameCountry.addEventListener('change', () => {
+    renderNewGameRegions('');
+    renderNewGameCourses('');
+  });
+  els.newGameRegion.addEventListener('change', () => renderNewGameCourses(''));
   els.cancelGame.addEventListener('click', closeGameModal);
   els.cancelGameBottom.addEventListener('click', closeGameModal);
 
@@ -2808,7 +2888,13 @@ function addListeners() {
       els.newGameCode.setCustomValidity('');
       return;
     }
-    const course = allCourses().find(item => item.id === els.newGameCourse.value) || allCourses()[0];
+    const course = allCourses().find(item => item.id === els.newGameCourse.value);
+    if (!course) {
+      els.newGameCourse.setCustomValidity(t('Choose a course.'));
+      els.newGameCourse.reportValidity();
+      els.newGameCourse.setCustomValidity('');
+      return;
+    }
     const teeTime = els.newGameTeeTime.value;
     const nextState = {
       courseId: course.id,

@@ -65,6 +65,8 @@
     'Shared': '共享',
     'Course in North America': '北美球场',
     'Manual': '手动',
+    'Choose a course.': '请选择球场。',
+    'No courses for selected filters': '所选筛选条件下没有球场',
     'Add': '添加',
     'Use': '使用',
     'Cancel': '取消',
